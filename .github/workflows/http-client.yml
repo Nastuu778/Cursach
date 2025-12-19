@@ -1,0 +1,110 @@
+name: 'C++ CI - HTTP Client with libcurl'
+
+on:
+  push:
+    branches:
+      - lab3  # или другая ветка, где находится ваш код
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_version: ${{ steps.get_version.outputs.commit_count }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Get commit count
+        id: get_version
+        run: |
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v0.0.${{ steps.get_version.outputs.commit_count }}
+          release_name: Release v0.0.${{ steps.get_version.outputs.commit_count }}
+          draft: false
+          prerelease: false
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: create-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libcurl4-openssl-dev
+
+      - name: Compile fetch_url
+        run: g++ -std=c++17 -o fetch_url fetch_url.cpp -lcurl
+
+      - name: Test the program
+        run: |
+          ./fetch_url https://httpbin.org/get > /dev/null
+          echo "✓ HTTP request successful"
+
+      - name: Create Linux distribution package
+        run: |
+          mkdir -p dist
+          cp fetch_url dist/
+          tar -czf fetch_url-linux-v0.0.${{ needs.create-release.outputs.release_version }}.tar.gz -C dist .
+
+      - name: Upload Linux Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./fetch_url-linux-v0.0.${{ needs.create-release.outputs.release_version }}.tar.gz
+          asset_name: fetch_url-linux-v0.0.${{ needs.create-release.outputs.release_version }}.tar.gz
+          asset_content_type: application/gzip
+
+  build-windows:
+    runs-on: windows-latest
+    needs: create-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install vcpkg and libcurl
+        run: |
+          git clone https://github.com/Microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg install curl:x64-windows
+
+      - name: Compile with MSVC
+        run: |
+          cl /EHsc /std:c++17 /I"vcpkg\installed\x64-windows\include" fetch_url.cpp /link /LIBPATH:"vcpkg\installed\x64-windows\lib" libcurl.lib wsock32.lib wldap32.lib
+
+      - name: Test the program
+        run: |
+          .\fetch_url.exe https://httpbin.org/get > $null
+          Write-Host "✓ HTTP request successful"
+
+      - name: Create Windows distribution package
+        run: |
+          Compress-Archive -Path "fetch_url.exe" -DestinationPath "fetch_url-windows-v0.0.${{ needs.create-release.outputs.release_version }}.zip"
+
+      - name: Upload Windows Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./fetch_url-windows-v0.0.${{ needs.create-release.outputs.release_version }}.zip
+          asset_name: fetch_url-windows-v0.0.${{ needs.create-release.outputs.release_version }}.zip
+          asset_content_type: application/zip
