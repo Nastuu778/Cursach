@@ -3,7 +3,7 @@ name: 'C++ CI - HTTP Client with libcurl'
 on:
   push:
     branches:
-      - lab3  # или другая ветка, где находится ваш код
+      - main
 
 jobs:
   create-release:
